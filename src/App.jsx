@@ -64,16 +64,12 @@ export default function App() {
           </div>
         </div>
         </div>
-        <div className="text-center pl-6 sm:pl-12">
-  {/* Title */}
-  <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900 mb-2">
-    SEAMLESS BUS MONITORING MADE EASY
-  </h1>
-  <p className="text-base sm:text-lg text-gray-700 mb-6">
-    Track - Ride - Arrive
-  </p>
-</div>
 
+      {/* Title */}
+      <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900 mb-2">
+        SEAMLESS BUS MONITORING MADE EASY
+      </h1>
+      <p className="text-base sm:text-lg text-gray-700 mb-6">Track - Ride - Arrive</p>
 
       {/* Dropdowns */}
       <div className="space-y-4 mb-6 md:flex md:justify-center md:flex-col md:items-center">
