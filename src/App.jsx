@@ -55,15 +55,27 @@ export default function App() {
     <div className="min-h-screen bg-white px-4 sm:px-6 md:px-12 py-6 font-sans">
       {/* Header */}
       <div className="flex justify-between items-center mb-8">
-        <div className="flex items-center space-x-2">
-          <img src="/LOGO.png" alt="Logo" className="w-10 h-10 sm:w-12 sm:h-12" />
-          <div className="font-bold text-lg sm:text-xl text-gray-800 leading-tight">
-            Gokaraju
-            <br />
-            <span className="text-sm sm:text-base font-normal">Bus Buddies</span>
-          </div>
-        </div>
-        </div>
+      <div className="flex items-center space-x-2">
+      <div className="flex justify-between items-center mb-8">
+  {/* Gokaraju branding block (left) */}
+  <div className="flex items-center space-x-2">
+    <img src="/LOGO.png" alt="Logo" className="w-10 h-10 sm:w-12 sm:h-12" />
+    <div className="font-bold text-lg sm:text-xl text-gray-800 leading-tight">
+      Gokaraju
+      <br />
+      <span className="text-sm sm:text-base font-normal">Bus Buddies</span>
+    </div>
+  </div>
+
+  {/* New logo (right end of screen) */}
+  <img
+    src="/aac copy.png"
+    alt="New Logo"
+    className="w-1 h-1 sm:w-10 sm:h-10 absolute right-4 top-1/7 transform -translate-y-1/2"
+  />
+</div>
+</div>
+</div>
 
       {/* Title */}
       <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900 mb-2">
@@ -169,12 +181,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Social Icons */}
-        <div className="flex justify-center gap-6 mt-10 text-2xl">
-          <span className="bg-white text-black rounded-full p-2 w-10 h-10 flex items-center justify-center">📸</span>
-          <span className="bg-white text-black rounded-full p-2 w-10 h-10 flex items-center justify-center">📘</span>
-          <span className="bg-white text-black rounded-full p-2 w-10 h-10 flex items-center justify-center">✉️</span>
-        </div>
 
         {/* Tagline */}
         <div className="border border-dashed border-white mt-10 p-4 text-center text-sm">
