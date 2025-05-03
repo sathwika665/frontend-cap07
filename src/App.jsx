@@ -69,10 +69,11 @@ export default function App() {
 
   {/* New logo (right end of screen) */}
   <img
-    src="/aac copy.png"
-    alt="New Logo"
-    className="w-1 h-1 sm:w-10 sm:h-10 absolute right-4 top-1/7 transform -translate-y-1/2"
-  />
+  src="/aac copy.png"
+  alt="New Logo"
+  className="w-8 h-8 sm:w-10 sm:h-10 fixed top-4 right-4 z-50"
+/>
+
 </div>
 </div>
 </div>
