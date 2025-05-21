@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Hyderabad Bus Tracker</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    #map {
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+  // Initialize the map
+  const map = L.map('map').setView([17.385044, 78.486671], 13); // Hyderabad
+
+  // Add OpenStreetMap tiles
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+
+  // Add a bus marker
+  const busIcon = L.icon({
+    iconUrl: 'https://cdn-icons-png.flaticon.com/512/61/61231.png',
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+    popupAnchor: [0, -10]
+  });
+
+  let busMarker = L.marker([17.385044, 78.486671], { icon: busIcon }).addTo(map)
+    .bindPopup("Bus #1 - Initial Position").openPopup();
+
+  // Example: simulate bus movement
+  let lat = 17.385044;
+  let lng = 78.486671;
+
+  setInterval(() => {
+    lat += (Math.random() - 0.5) * 0.001;
+    lng += (Math.random() - 0.5) * 0.001;
+    busMarker.setLatLng([lat, lng]);
+    busMarker.setPopupContent(`Bus #1 - Updated Position: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+    map.panTo([lat, lng]);
+  }, 5000); // update every 5 seconds
+</script>
+
+</body>
+</html>
