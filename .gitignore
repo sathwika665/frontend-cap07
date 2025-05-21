@@ -1,6 +1,6 @@
 # Ignore all node_modules folders (top-level + nested)
 **/node_modules/
-
+README.md
 # Build output
 /build/
 /dist/
