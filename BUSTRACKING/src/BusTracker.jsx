@@ -1,111 +1,70 @@
-import { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import 'leaflet-routing-machine/dist/leaflet-routing-machine.css';
-import 'leaflet-routing-machine';
+import axios from 'axios';
 
-// Vite asset imports
-import taxiIconUrl from '/assets/bus.png';
-import iconRetinaUrl from 'leaflet/dist/images/marker-icon-2x.png?url';
-import iconUrl from 'leaflet/dist/images/marker-icon.png?url';
-import shadowUrl from 'leaflet/dist/images/marker-shadow.png?url';
-
-const BusTracker = () => {
+function BusTracker() {
   const mapRef = useRef(null);
-  const routingControlRef = useRef(null);
-  const busRef = useRef(null);
-  const sourceRef = useRef(null);
-  const destRef = useRef(null);
+  const markerRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const [coordinates, setCoordinates] = useState([]);
+  const indexRef = useRef(0);
 
-  const DEFAULT_SOURCE = [17.4945, 78.3996]; // Kukatpally
-  const DEFAULT_DEST = [17.4969, 78.3658];  // GRIET
-
+  // Fetch coordinates every 5 seconds
   useEffect(() => {
-    const DefaultIcon = L.icon({
-      iconRetinaUrl,
-      iconUrl,
-      shadowUrl,
-      iconSize: [25, 41],
-      iconAnchor: [12, 41],
-    });
-    L.Marker.prototype.options.icon = DefaultIcon;
-
-    const map = L.map(mapRef.current).setView(DEFAULT_SOURCE, 13);
-
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(map);
-
-    const busIcon = L.icon({
-      iconUrl: taxiIconUrl,
-      iconSize: [50, 50],
-      iconAnchor: [25, 25],
-    });
-
-    // Add draggable source marker
-    sourceRef.current = L.marker(DEFAULT_SOURCE, { draggable: true }).addTo(map).bindPopup("Source").openPopup();
-
-    // Add draggable destination marker
-    destRef.current = L.marker(DEFAULT_DEST, { draggable: true }).addTo(map).bindPopup("Destination").openPopup();
-
-    // Add bus icon initially at source
-    busRef.current = L.marker(DEFAULT_SOURCE, { icon: busIcon }).addTo(map);
-
-    const calculateRoute = () => {
-      if (routingControlRef.current) {
-        map.removeControl(routingControlRef.current);
-      }
-
-      routingControlRef.current = L.Routing.control({
-        waypoints: [
-          sourceRef.current.getLatLng(),
-          destRef.current.getLatLng()
-        ],
-        routeWhileDragging: false,
-        showAlternatives: false,
-        createMarker: () => null,
-        lineOptions: {
-          styles: [{ color: '#FF5733', opacity: 0.8, weight: 5 }]
-        }
-      })
-        .on('routesfound', function (e) {
-          const route = e.routes[0];
-          const coords = route.coordinates;
-
-          // Animate the bus along the route
-          coords.forEach((coord, i) => {
-            setTimeout(() => {
-              busRef.current.setLatLng([coord.lat, coord.lng]);
-            }, 40 * i);
-          });
+    const fetchCoords = () => {
+      axios.get('http://localhost:4000/coordinates')
+        .then(res => {
+          if (res.data.length !== coordinates.length) {
+            setCoordinates(res.data);
+          }
         })
-        .addTo(map);
+        .catch(console.error);
     };
 
-    // Initial route
-    calculateRoute();
+    fetchCoords();
+    const interval = setInterval(fetchCoords, 5000);
+    return () => clearInterval(interval);
+  }, [coordinates.length]);
 
-    // Recalculate route on dragging either point
-    sourceRef.current.on('dragend', calculateRoute);
-    destRef.current.on('dragend', calculateRoute);
+  // Initialize map and marker
+  useEffect(() => {
+    if (coordinates.length === 0) return;
 
-    return () => {
-      map.remove();
-    };
-  }, []);
+    if (!mapInstanceRef.current) {
+      const map = L.map(mapRef.current).setView(coordinates[0], 16);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-  return (
-    <div
-      ref={mapRef}
-      style={{
-        width: '100%',
-        height: '100vh',
-        position: 'fixed',
-        top: 0,
-        left: 0
-      }}
-    />
-  );
-};
+      const busIcon = L.icon({
+        iconUrl: '/9249336-removebg-preview.png',
+        iconSize: [60, 60],
+        iconAnchor: [35, 35],
+      });
+
+      const marker = L.marker(coordinates[0], { icon: busIcon }).addTo(map);
+      markerRef.current = marker;
+      mapInstanceRef.current = map;
+      indexRef.current = 0;
+    }
+  }, [coordinates]);
+
+  // Move marker every 3 seconds
+  useEffect(() => {
+    if (!markerRef.current || coordinates.length === 0) return;
+
+    const interval = setInterval(() => {
+      if (indexRef.current < coordinates.length - 1) {
+        indexRef.current += 1;
+        const [lat, lng] = coordinates[indexRef.current];
+        markerRef.current.setLatLng([lat, lng]);
+        mapInstanceRef.current.panTo([lat, lng]);
+      }
+    },1000);
+
+    return () => clearInterval(interval);
+  }, [coordinates]);
+
+  return <div ref={mapRef} style={{ height: '100vh' }} />;
+}
 
 export default BusTracker;

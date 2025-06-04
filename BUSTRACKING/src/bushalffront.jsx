@@ -36,6 +36,7 @@ export default function App() {
             <option value="" disabled>Select Bus Route</option>
             <option value="Route 1">Route 1</option>
             <option value="Route 2">Route 2</option>
+           
           </select>
           <ChevronDown className="absolute right-4 top-3.5 text-white pointer-events-none" />
         </div>
