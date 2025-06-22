@@ -1,23 +1,43 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import axios from 'axios';
 
 function BusTracker() {
-  const mapRef = useRef(null);
-  const markerRef = useRef(null);
-  const mapInstanceRef = useRef(null);
-  const [coordinates, setCoordinates] = useState([]);
-  const indexRef = useRef(0);
+  const location = useLocation();
+  const selectedRoute = location.state?.route || null;
 
-  // Fetch coordinates every 5 seconds
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markerRef = useRef(null);
+
+  const [coordinate, setCoordinate] = useState(null);
+  const [hasCentered, setHasCentered] = useState(false);
+
+  // 1. Initialize map on mount (centered at a default location)
   useEffect(() => {
+    if (!mapInstanceRef.current) {
+      const map = L.map(mapRef.current).setView([17.428796452434764, 78.45891706071164], 16);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+      mapInstanceRef.current = map;
+    }
+    return () => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
+    };
+  }, []);
+
+  // 2. Fetch coordinates for all routes every 5 seconds, but only use the selected route
+  useEffect(() => {
+    if (!selectedRoute) return;
     const fetchCoords = () => {
       axios.get('http://localhost:4000/coordinates')
         .then(res => {
-          if (res.data.length !== coordinates.length) {
-            setCoordinates(res.data);
-          }
+          const coord = res.data && res.data[selectedRoute];
+          setCoordinate(Array.isArray(coord) ? coord : null);
         })
         .catch(console.error);
     };
@@ -25,46 +45,82 @@ function BusTracker() {
     fetchCoords();
     const interval = setInterval(fetchCoords, 5000);
     return () => clearInterval(interval);
-  }, [coordinates.length]);
+  }, [selectedRoute]);
 
-  // Initialize map and marker
+  // 3. Manage marker for the selected route
   useEffect(() => {
-    if (coordinates.length === 0) return;
+    if (!mapInstanceRef.current) return;
 
-    if (!mapInstanceRef.current) {
-      const map = L.map(mapRef.current).setView(coordinates[0], 16);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    // Remove previous marker if any
+    if (markerRef.current) {
+      mapInstanceRef.current.removeLayer(markerRef.current);
+      markerRef.current = null;
+    }
 
+    if (Array.isArray(coordinate) && coordinate.length === 2) {
       const busIcon = L.icon({
         iconUrl: '/9249336-removebg-preview.png',
         iconSize: [60, 60],
-        iconAnchor: [35, 35],
+        iconAnchor: [30, 30],
       });
 
-      const marker = L.marker(coordinates[0], { icon: busIcon }).addTo(map);
+      const marker = L.marker(coordinate, { icon: busIcon })
+        .addTo(mapInstanceRef.current)
+        .bindPopup(`<b>${selectedRoute}</b>`);
       markerRef.current = marker;
-      mapInstanceRef.current = map;
-      indexRef.current = 0;
-    }
-  }, [coordinates]);
 
-  // Move marker every 3 seconds
-  useEffect(() => {
-    if (!markerRef.current || coordinates.length === 0) return;
-
-    const interval = setInterval(() => {
-      if (indexRef.current < coordinates.length - 1) {
-        indexRef.current += 1;
-        const [lat, lng] = coordinates[indexRef.current];
-        markerRef.current.setLatLng([lat, lng]);
-        mapInstanceRef.current.panTo([lat, lng]);
+      // Recenter only the first time the marker appears
+      if (!hasCentered) {
+        mapInstanceRef.current.setView(coordinate, 16);
+        setHasCentered(true);
       }
-    },1000);
+      // Otherwise, do not recenter
+    }
+    // If coordinate is null, marker is removed (see above)
+  }, [coordinate, selectedRoute, hasCentered]);
 
-    return () => clearInterval(interval);
-  }, [coordinates]);
+  // Reset hasCentered if route changes
+  useEffect(() => {
+    setHasCentered(false);
+  }, [selectedRoute]);
 
-  return <div ref={mapRef} style={{ height: '100vh' }} />;
+  // Handler for recenter button
+  const handleRecenter = () => {
+    if (mapInstanceRef.current && Array.isArray(coordinate) && coordinate.length === 2) {
+      mapInstanceRef.current.setView(coordinate, 16);
+    }
+  };
+
+  return (
+    <div style={{ position: 'relative', height: '100vh', width: '100vw', minHeight: 400, minWidth: 400 }}>
+      <div
+        ref={mapRef}
+        style={{
+          height: '100%',
+          width: '100%',
+          zIndex: 0,
+        }}
+      />
+      {/* Recenter Button Overlay */}
+      <button
+        onClick={handleRecenter}
+        style={{
+          position: 'absolute',
+          top: 20,
+          right: 20,
+          zIndex: 1000,
+          padding: '10px 20px',
+          background: '#fff',
+          border: '1px solid #888',
+          borderRadius: 4,
+          cursor: 'pointer',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+        }}
+      >
+        Recenter
+      </button>
+    </div>
+  );
 }
 
 export default BusTracker;
