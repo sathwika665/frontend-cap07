@@ -5,6 +5,37 @@ const ROUTE_COUNT = 17;
 const BASE_LAT = 17.4850;
 const BASE_LNG = 78.3950;
 
+// Fixed route path for Route 1 (demo route)
+const route1Path = [
+  { lat: 17.4850, lng: 78.3950 },
+  { lat: 17.4858, lng: 78.3953 },
+  { lat: 17.4865, lng: 78.3956 },
+  { lat: 17.4872, lng: 78.3959 },
+  { lat: 17.4879, lng: 78.3963 },
+  { lat: 17.4886, lng: 78.3967 },
+  { lat: 17.4893, lng: 78.3970 },
+  { lat: 17.4900, lng: 78.3974 },
+  { lat: 17.4907, lng: 78.3978 },
+  { lat: 17.4914, lng: 78.3982 },
+  { lat: 17.4921, lng: 78.3986 },
+  { lat: 17.4928, lng: 78.3990 },
+  { lat: 17.4935, lng: 78.3995 },
+  { lat: 17.4942, lng: 78.3999 },
+  { lat: 17.4949, lng: 78.4004 },
+  { lat: 17.4956, lng: 78.4008 },
+  { lat: 17.4963, lng: 78.4013 },
+  { lat: 17.4970, lng: 78.4017 },
+  { lat: 17.4977, lng: 78.4022 },
+  { lat: 17.4984, lng: 78.4027 },
+  { lat: 17.4991, lng: 78.4032 },
+  { lat: 17.4998, lng: 78.4037 },
+  { lat: 17.5000, lng: 78.4050 },
+];
+
+
+// Track current position index for Route 1
+let route1Index = 0;
+
 // Function to generate a random coordinate near a base point
 function generateRandomCoordinate(baseLat, baseLng, maxOffset = 0.001) {
   const latOffset = Math.random() * 2 * maxOffset - maxOffset;
@@ -18,7 +49,16 @@ function generateRandomCoordinate(baseLat, baseLng, maxOffset = 0.001) {
 function sendAllRoutes() {
   for (let i = 1; i <= ROUTE_COUNT; i++) {
     const route = `Route ${i}`;
-    const [latitude, longitude] = generateRandomCoordinate(BASE_LAT, BASE_LNG);
+    let latitude, longitude;
+    if (i === 1) {
+      // Route 1: use next fixed point in path
+      const point = route1Path[route1Index];
+      latitude = point.lat;
+      longitude = point.lng;
+    } else {
+      // Other routes stay random
+      [latitude, longitude] = generateRandomCoordinate(BASE_LAT, BASE_LNG);
+    }
 
     axios.post(BASE_URL, { latitude, longitude, route, status: "active" })
       .then(() => {
@@ -28,12 +68,14 @@ function sendAllRoutes() {
         console.error(`❌ Error sending coordinate for ${route}:`, err.message);
       });
   }
+  // Advance Route 1 index (loop back at end)
+  route1Index = (route1Index + 1) % route1Path.length;
 }
 
 // Send random coordinates for all routes every second
-const interval = setInterval(sendAllRoutes, 1000);
+const interval = setInterval(sendAllRoutes, 200);
 
-console.log('🚗 Simulator started. Sending random coordinates for all routes every second...');
+console.log('🚗 Simulator started. Sending coordinates...');
 
 // Graceful shutdown: send "stopped" for all routes before exit
 function sendStoppedStatus() {

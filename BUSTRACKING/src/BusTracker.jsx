@@ -13,9 +13,10 @@ function BusTracker() {
   const markerRef = useRef(null);
 
   const [coordinate, setCoordinate] = useState(null);
+  const [eta, setEta] = useState(null);
   const [hasCentered, setHasCentered] = useState(false);
 
-  // 1. Initialize map on mount (centered at a default location)
+  // Initialize map on mount
   useEffect(() => {
     if (!mapInstanceRef.current) {
       const map = L.map(mapRef.current).setView([17.428796452434764, 78.45891706071164], 16);
@@ -30,7 +31,7 @@ function BusTracker() {
     };
   }, []);
 
-  // 2. Fetch coordinates for all routes every 5 seconds, but only use the selected route
+  // Fetch coordinates for selected route every 5 seconds
   useEffect(() => {
     if (!selectedRoute) return;
     const fetchCoords = () => {
@@ -41,21 +42,27 @@ function BusTracker() {
         })
         .catch(console.error);
     };
-
     fetchCoords();
     const interval = setInterval(fetchCoords, 5000);
     return () => clearInterval(interval);
   }, [selectedRoute]);
 
-  // 3. Manage marker for the selected route
+  // Fetch ETA for selected route every 5 seconds
+  useEffect(() => {
+    if (!selectedRoute) return;
+    const fetchEta = () => {
+      axios.get(`http://localhost:4000/eta?route=${encodeURIComponent(selectedRoute)}`)
+        .then(res => setEta(res.data.eta))
+        .catch(() => setEta(null));
+    };
+    fetchEta();
+    const interval = setInterval(fetchEta, 5000);
+    return () => clearInterval(interval);
+  }, [selectedRoute]);
+
+  // Update marker position on map
   useEffect(() => {
     if (!mapInstanceRef.current) return;
-
-    // Remove previous marker if any
-    if (markerRef.current) {
-      mapInstanceRef.current.removeLayer(markerRef.current);
-      markerRef.current = null;
-    }
 
     if (Array.isArray(coordinate) && coordinate.length === 2) {
       const busIcon = L.icon({
@@ -64,27 +71,32 @@ function BusTracker() {
         iconAnchor: [30, 30],
       });
 
-      const marker = L.marker(coordinate, { icon: busIcon })
-        .addTo(mapInstanceRef.current)
-        .bindPopup(`<b>${selectedRoute}</b>`);
-      markerRef.current = marker;
+      if (markerRef.current) {
+        markerRef.current.setLatLng(coordinate);
+      } else {
+        const marker = L.marker(coordinate, { icon: busIcon })
+          .addTo(mapInstanceRef.current)
+          .bindPopup(`<b>${selectedRoute}</b>`);
+        markerRef.current = marker;
+      }
 
-      // Recenter only the first time the marker appears
       if (!hasCentered) {
         mapInstanceRef.current.setView(coordinate, 16);
         setHasCentered(true);
       }
-      // Otherwise, do not recenter
+    } else {
+      if (markerRef.current) {
+        mapInstanceRef.current.removeLayer(markerRef.current);
+        markerRef.current = null;
+      }
     }
-    // If coordinate is null, marker is removed (see above)
   }, [coordinate, selectedRoute, hasCentered]);
 
-  // Reset hasCentered if route changes
+  // Reset centering when route changes
   useEffect(() => {
     setHasCentered(false);
   }, [selectedRoute]);
 
-  // Handler for recenter button
   const handleRecenter = () => {
     if (mapInstanceRef.current && Array.isArray(coordinate) && coordinate.length === 2) {
       mapInstanceRef.current.setView(coordinate, 16);
@@ -95,13 +107,32 @@ function BusTracker() {
     <div style={{ position: 'relative', height: '100vh', width: '100vw', minHeight: 400, minWidth: 400 }}>
       <div
         ref={mapRef}
-        style={{
-          height: '100%',
-          width: '100%',
-          zIndex: 0,
-        }}
+        style={{ height: '100%', width: '100%', zIndex: 0 }}
       />
-      {/* Recenter Button Overlay */}
+      {/* ETA display */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 80,
+          right: 20,
+          zIndex: 1000,
+          padding: '10px 20px',
+          background: '#fff',
+          border: '1px solid #888',
+          borderRadius: 4,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+          fontWeight: 'bold',
+          fontSize: 16,
+          userSelect: 'none',
+        }}
+      >
+        {eta !== null && eta <= 1 
+          ? 'Arrived' 
+          : eta > 1 
+          ? `Estimated Arrival: ${eta} min` 
+          : 'ETA not available'}
+      </div>
+      {/* Recenter button */}
       <button
         onClick={handleRecenter}
         style={{
