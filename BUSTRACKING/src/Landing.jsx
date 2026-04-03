@@ -63,19 +63,18 @@ function Landing() {
     },
   ];
 
-  // Generate route options dynamically
+  // Fixed: Use backticks and curly braces for template literals in JSX
   const routeOptions = Array.from({ length: 17 }, (_, i) => (
     <option key={i + 1} value={`Route ${i + 1}`}>{`Route ${i + 1}`}</option>
   ));
 
   const handleConfirm = () => {
-  if (route && year) {
-    navigate('/BusTracker', { state: { route } }); // Pass route in navigation state
-  } else {
-    alert('Please select both bus route and year of study');
-  }
-};
-
+    if (route && year) {
+      navigate('/BusTracker', { state: { route } }); // Pass route in navigation state
+    } else {
+      alert('Please select both bus route and year of study');
+    }
+  };
 
   return (
     <div className="min-h-screen bg-white px-4 sm:px-6 md:px-12 py-6 font-sans">
@@ -210,7 +209,7 @@ function Landing() {
               <div className="flex justify-center gap-6 mt-10 text-2xl">
                 <span className="bg-white text-black rounded-full p-2 w-10 h-10 flex items-center justify-center">📸</span>
                 <span className="bg-white text-black rounded-full p-2 w-10 h-10 flex items-center justify-center">📘</span>
-                <span className="bg-white text-black rounded-full p-2 w-10 h-10 flex items-center justify-center">✉️</span>
+                <span className="bg-white text-black rounded-full p-2 w-10 h-10 flex items-center justify-center">✉</span>
               </div>
 
               {/* Tagline */}
