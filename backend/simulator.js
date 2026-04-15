@@ -32,11 +32,8 @@ const route1Path = [
   { lat: 17.5000, lng: 78.4050 },
 ];
 
-
-// Track current position index for Route 1
 let route1Index = 0;
 
-// Function to generate a random coordinate near a base point
 function generateRandomCoordinate(baseLat, baseLng, maxOffset = 0.001) {
   const latOffset = Math.random() * 2 * maxOffset - maxOffset;
   const lngOffset = Math.random() * 2 * maxOffset - maxOffset;
@@ -48,17 +45,10 @@ function generateRandomCoordinate(baseLat, baseLng, maxOffset = 0.001) {
 
 function sendAllRoutes() {
   for (let i = 1; i <= ROUTE_COUNT; i++) {
+    if (i === 1) continue;
+
     const route = `Route ${i}`;
-    let latitude, longitude;
-    if (i === 1) {
-      // Route 1: use next fixed point in path
-      const point = route1Path[route1Index];
-      latitude = point.lat;
-      longitude = point.lng;
-    } else {
-      // Other routes stay random
-      [latitude, longitude] = generateRandomCoordinate(BASE_LAT, BASE_LNG);
-    }
+    const [latitude, longitude] = generateRandomCoordinate(BASE_LAT, BASE_LNG);
 
     axios.post(BASE_URL, { latitude, longitude, route, status: "active" })
       .then(() => {
@@ -68,20 +58,21 @@ function sendAllRoutes() {
         console.error(`❌ Error sending coordinate for ${route}:`, err.message);
       });
   }
-  // Advance Route 1 index (loop back at end)
+
   route1Index = (route1Index + 1) % route1Path.length;
 }
 
-// Send random coordinates for all routes every second
-const interval = setInterval(sendAllRoutes, 200);
+const interval = setInterval(sendAllRoutes, 1000);
 
-console.log('🚗 Simulator started. Sending coordinates...');
+console.log('🚗 Simulator started. Sending random coordinates for Routes 2-17 every second...');
 
-// Graceful shutdown: send "stopped" for all routes before exit
 function sendStoppedStatus() {
-  console.log('🛑 Simulator stopping. Sending stopped status for all routes...');
+  console.log('🛑 Simulator stopping. Sending stopped status for simulated routes...');
   const promises = [];
+
   for (let i = 1; i <= ROUTE_COUNT; i++) {
+    if (i === 1) continue;
+
     const route = `Route ${i}`;
     promises.push(
       axios.post(BASE_URL, { route, status: "stopped" })
@@ -93,6 +84,7 @@ function sendStoppedStatus() {
         })
     );
   }
+
   Promise.all(promises).finally(() => process.exit(0));
 }
 
@@ -100,6 +92,7 @@ process.on('SIGINT', () => {
   clearInterval(interval);
   sendStoppedStatus();
 });
+
 process.on('SIGTERM', () => {
   clearInterval(interval);
   sendStoppedStatus();
