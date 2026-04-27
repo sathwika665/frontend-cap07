@@ -1,11 +1,30 @@
-const axios = require('axios');
+require('dotenv').config();
+const { initializeApp } = require('firebase/app');
+const { getDatabase, ref, set } = require('firebase/database');
 
-const BASE_URL = 'http://localhost:4000/coordinates';
+const firebaseConfig = {
+  apiKey: process.env.FIREBASE_API_KEY,
+  authDomain: process.env.FIREBASE_AUTH_DOMAIN,
+  databaseURL: process.env.FIREBASE_DATABASE_URL,
+  projectId: process.env.FIREBASE_PROJECT_ID,
+  storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.FIREBASE_APP_ID
+};
+
+console.log("Starting Simulator...");
+if (!firebaseConfig.apiKey) {
+  console.log("⚠️ No Firebase config found in .env. Please configure Firebase to run the simulator.");
+}
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
 const ROUTE_COUNT = 17;
 const BASE_LAT = 17.4850;
 const BASE_LNG = 78.3950;
 
-// Fixed route path for Route 1 (demo route)
+// Fake Route 1 movement data
 const route1Path = [
   { lat: 17.4850, lng: 78.3950 },
   { lat: 17.4858, lng: 78.3953 },
@@ -43,26 +62,32 @@ function generateRandomCoordinate(baseLat, baseLng, maxOffset = 0.001) {
   ];
 }
 
-function sendAllRoutes() {
+async function sendAllRoutes() {
   for (let i = 1; i <= ROUTE_COUNT; i++) {
+    const route = `Route ${i}`;
+    let lat, lng;
+
     if (i === 1) {
       const r1Pos = route1Path[route1Index];
-      axios.post(BASE_URL, { latitude: r1Pos.lat, longitude: r1Pos.lng, route: "Route 1", status: "active" })
-        .then(() => console.log(`✅ Sent: (${r1Pos.lat}, ${r1Pos.lng}) for Route 1 [active]`))
-        .catch(err => console.error(`❌ Error sending coordinate for Route 1:`, err.message));
-      continue;
+      lat = r1Pos.lat;
+      lng = r1Pos.lng;
+    } else {
+      const [randomLat, randomLng] = generateRandomCoordinate(BASE_LAT, BASE_LNG);
+      lat = randomLat;
+      lng = randomLng;
     }
 
-    const route = `Route ${i}`;
-    const [latitude, longitude] = generateRandomCoordinate(BASE_LAT, BASE_LNG);
-
-    axios.post(BASE_URL, { latitude, longitude, route, status: "active" })
-      .then(() => {
-        console.log(`✅ Sent: (${latitude}, ${longitude}) for ${route} [active]`);
-      })
-      .catch(err => {
-        console.error(`❌ Error sending coordinate for ${route}:`, err.message);
+    try {
+      await set(ref(db, `routes/${route}`), {
+        latitude: lat,
+        longitude: lng,
+        status: 'active',
+        timestamp: Date.now()
       });
+      console.log(`✅ Firebase Written: (${lat}, ${lng}) for ${route}`);
+    } catch (err) {
+      console.error(`❌ Error writing to Firebase for ${route}:`, err.message);
+    }
   }
 
   route1Index = (route1Index + 1) % route1Path.length;
@@ -70,24 +95,24 @@ function sendAllRoutes() {
 
 const interval = setInterval(sendAllRoutes, 1000);
 
-console.log('🚗 Simulator started. Sending random coordinates for Routes 2-17 every second...');
+console.log('🚗 Simulator started. Sending ALL routes (1-17) to Firebase every second...');
 
 function sendStoppedStatus() {
-  console.log('🛑 Simulator stopping. Sending stopped status for simulated routes...');
+  console.log('🛑 Simulator stopping. Sending stopped status for simulated routes to Firebase...');
   const promises = [];
 
   for (let i = 1; i <= ROUTE_COUNT; i++) {
-    if (i === 1) continue;
-
     const route = `Route ${i}`;
+    
     promises.push(
-      axios.post(BASE_URL, { route, status: "stopped" })
-        .then(() => {
-          console.log(`🛑 Sent stopped status for ${route}`);
-        })
-        .catch(err => {
-          console.error(`❌ Error sending stopped status for ${route}:`, err.message);
-        })
+      set(ref(db, `routes/${route}`), {
+        status: 'stopped',
+        timestamp: Date.now()
+      }).then(() => {
+        console.log(`🛑 Firebase status set to stopped for ${route}`);
+      }).catch(err => {
+        console.error(`❌ Error updating Firebase for ${route}:`, err.message);
+      })
     );
   }
 

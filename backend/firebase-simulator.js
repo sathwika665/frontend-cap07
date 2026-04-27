@@ -21,9 +21,7 @@ if (!firebaseConfig.apiKey) {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
-const ROUTE_COUNT = 17;
-const BASE_LAT = 17.4850;
-const BASE_LNG = 78.3950;
+
 
 // Fake Route 1 movement data
 const route1Path = [
@@ -40,43 +38,27 @@ const route1Path = [
 
 let route1Index = 0;
 
-function generateRandomCoordinate(baseLat, baseLng, maxOffset = 0.001) {
-  const latOffset = Math.random() * 2 * maxOffset - maxOffset;
-  const lngOffset = Math.random() * 2 * maxOffset - maxOffset;
-  return [
-    Number((baseLat + latOffset).toFixed(7)),
-    Number((baseLng + lngOffset).toFixed(7))
-  ];
-}
+
 
 async function sendAllRoutes() {
-  for (let i = 1; i <= ROUTE_COUNT; i++) {
-    const routeName = `Route ${i}`;
-    let lat, lng;
-    
-    if (i === 1) {
-      const r1Pos = route1Path[route1Index];
-      lat = r1Pos.lat;
-      lng = r1Pos.lng;
-    } else {
-      const [randomLat, randomLng] = generateRandomCoordinate(BASE_LAT, BASE_LNG);
-      lat = randomLat;
-      lng = randomLng;
-    }
+  const routeName = `Route 1`;
+  const r1Pos = route1Path[route1Index];
+  const lat = r1Pos.lat;
+  const lng = r1Pos.lng;
 
-    try {
-      // Write to Firebase Realtime Database
-      await set(ref(db, `routes/${routeName}`), {
-        latitude: lat,
-        longitude: lng,
-        status: 'active',
-        timestamp: Date.now()
-      });
-      console.log(`✅ Firebase Written: (${lat}, ${lng}) for ${routeName}`);
-    } catch (err) {
-      console.error(`❌ Error writing to Firebase for ${routeName}:`, err.message);
-    }
+  try {
+    // Write to Firebase Realtime Database
+    await set(ref(db, `routes/${routeName}`), {
+      latitude: lat,
+      longitude: lng,
+      status: 'active',
+      timestamp: Date.now()
+    });
+    console.log(`✅ Firebase Written: (${lat}, ${lng}) for ${routeName}`);
+  } catch (err) {
+    console.error(`❌ Error writing to Firebase for ${routeName}:`, err.message);
   }
+  
   route1Index = (route1Index + 1) % route1Path.length;
 }
 
