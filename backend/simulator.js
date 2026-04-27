@@ -45,7 +45,13 @@ function generateRandomCoordinate(baseLat, baseLng, maxOffset = 0.001) {
 
 function sendAllRoutes() {
   for (let i = 1; i <= ROUTE_COUNT; i++) {
-    if (i === 1) continue;
+    if (i === 1) {
+      const r1Pos = route1Path[route1Index];
+      axios.post(BASE_URL, { latitude: r1Pos.lat, longitude: r1Pos.lng, route: "Route 1", status: "active" })
+        .then(() => console.log(`✅ Sent: (${r1Pos.lat}, ${r1Pos.lng}) for Route 1 [active]`))
+        .catch(err => console.error(`❌ Error sending coordinate for Route 1:`, err.message));
+      continue;
+    }
 
     const route = `Route ${i}`;
     const [latitude, longitude] = generateRandomCoordinate(BASE_LAT, BASE_LNG);

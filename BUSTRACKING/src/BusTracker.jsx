@@ -2,7 +2,23 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import axios from 'axios';
+import { database } from './firebase';
+import { ref, onValue } from 'firebase/database';
+
+// GRIET coordinates
+const GRIET_LAT = 17.525;
+const GRIET_LNG = 78.368;
+const BUS_SPEED_KMH = 25;
+
+function haversine(lat1, lon1, lat2, lon2) {
+  const toRad = deg => deg * Math.PI / 180;
+  const R = 6371; // km
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+}
 
 function BusTracker() {
   const location = useLocation();
@@ -15,12 +31,19 @@ function BusTracker() {
   const [coordinate, setCoordinate] = useState(null);
   const [eta, setEta] = useState(null);
   const [hasCentered, setHasCentered] = useState(false);
+  const [firebaseError, setFirebaseError] = useState(false);
 
   // Initialize map on mount
   useEffect(() => {
     if (!mapInstanceRef.current) {
-      const map = L.map(mapRef.current).setView([17.428796452434764, 78.45891706071164], 16);
+      const map = L.map(mapRef.current).setView([17.525, 78.368], 14);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+      
+      // Destination Marker for GRIET
+      L.marker([GRIET_LAT, GRIET_LNG])
+        .addTo(map)
+        .bindPopup(`<b>GRIET Campus</b>`);
+        
       mapInstanceRef.current = map;
     }
     return () => {
@@ -31,36 +54,38 @@ function BusTracker() {
     };
   }, []);
 
-  // Fetch coordinates for selected route every 5 seconds
+  // Fetch coordinates from Firebase Realtime Database
   useEffect(() => {
     if (!selectedRoute) return;
-    const fetchCoords = () => {
-      axios.get('http://localhost:4000/coordinates')
-        .then(res => {
-          const coord = res.data && res.data[selectedRoute];
-          setCoordinate(Array.isArray(coord) ? coord : null);
-        })
-        .catch(console.error);
-    };
-    fetchCoords();
-    const interval = setInterval(fetchCoords, 5000);
-    return () => clearInterval(interval);
+    
+    if (!database) {
+      setFirebaseError(true);
+      return;
+    }
+
+    const routeRef = ref(database, `routes/${selectedRoute}`);
+    const unsubscribe = onValue(routeRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data && data.latitude && data.longitude) {
+        setCoordinate([data.latitude, data.longitude]);
+        
+        // Calculate ETA securely on frontend utilizing destination coordinates
+        const dist = haversine(data.latitude, data.longitude, GRIET_LAT, GRIET_LNG);
+        const etaValue = Math.round((dist / BUS_SPEED_KMH) * 60);
+        setEta(etaValue);
+      } else {
+        setCoordinate(null);
+        setEta(null);
+      }
+    }, (error) => {
+      console.error("Firebase read error:", error);
+      setFirebaseError(true);
+    });
+
+    return () => unsubscribe();
   }, [selectedRoute]);
 
-  // Fetch ETA for selected route every 5 seconds
-  useEffect(() => {
-    if (!selectedRoute) return;
-    const fetchEta = () => {
-      axios.get(`http://localhost:4000/eta?route=${encodeURIComponent(selectedRoute)}`)
-        .then(res => setEta(res.data.eta))
-        .catch(() => setEta(null));
-    };
-    fetchEta();
-    const interval = setInterval(fetchEta, 5000);
-    return () => clearInterval(interval);
-  }, [selectedRoute]);
-
-  // Update marker position on map
+  // Update bus marker position on map
   useEffect(() => {
     if (!mapInstanceRef.current) return;
 
@@ -81,7 +106,7 @@ function BusTracker() {
       }
 
       if (!hasCentered) {
-        mapInstanceRef.current.setView(coordinate, 16);
+        mapInstanceRef.current.setView(coordinate, 14);
         setHasCentered(true);
       }
     } else {
@@ -99,12 +124,17 @@ function BusTracker() {
 
   const handleRecenter = () => {
     if (mapInstanceRef.current && Array.isArray(coordinate) && coordinate.length === 2) {
-      mapInstanceRef.current.setView(coordinate, 16);
+      mapInstanceRef.current.setView(coordinate, 15);
     }
   };
 
   return (
     <div style={{ position: 'relative', height: '100vh', width: '100vw', minHeight: 400, minWidth: 400 }}>
+      {firebaseError && (
+        <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', padding: '15px', background: '#ff4d4f', color: '#fff', textAlign: 'center', zIndex: 2000, fontWeight: 'bold' }}>
+          ⚠️ Firebase API is not configured! Please open `.env` and `.env.local` to enter your Firebase project keys.
+        </div>
+      )}
       <div
         ref={mapRef}
         style={{ height: '100%', width: '100%', zIndex: 0 }}

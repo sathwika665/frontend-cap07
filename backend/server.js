@@ -14,11 +14,11 @@ const route1Path = [
   { lat: 17.5000, lng: 78.4050 } // Destination
 ];
 
-// === Bus Stops (ETA destination for Route 1; dummy for others) ===
-const stops = {
-  "Route 1": { lat: 17.5000, lng: 78.4050 }
-  // Add "Route 2"–"Route 17" with dummy values if needed
-};
+// === Bus Stops (ETA destination for all routes is GRIET) ===
+const stops = {};
+for (let i = 1; i <= 17; i++) {
+  stops[`Route ${i}`] = { lat: 17.525, lng: 78.368 };
+}
 
 // --- Coordinates for all live buses ---
 let coordinates = {}; // { "Route N": [lat, lng] or null, ... }
