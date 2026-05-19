@@ -63,7 +63,8 @@ function BusTracker() {
       return;
     }
 
-    const routeRef = ref(database, `routes/${selectedRoute}`);
+    const firebaseKey = selectedRoute.replace(/ /g, '_');
+    const routeRef = ref(database, `routes/${firebaseKey}`);
     const unsubscribe = onValue(routeRef, (snapshot) => {
       const data = snapshot.val();
       if (data && data.latitude && data.longitude) {
