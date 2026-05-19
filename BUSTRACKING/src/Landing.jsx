@@ -1,12 +1,93 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronDown, Hand } from 'lucide-react';
+import { ChevronDown, Hand, AlertTriangle, MapPin } from 'lucide-react';
+import { database } from './firebase';
+import { ref, onValue, set } from 'firebase/database';
 import './index.css';
 
 function Landing() {
   const [route, setRoute] = useState('');
   const [year, setYear] = useState('');
+  const [sosActive, setSosActive] = useState(false);
   const navigate = useNavigate();
+
+  // Listen to both /GPS and /routes/Route_1 nodes for SOS signal globally
+  useEffect(() => {
+    if (!database) return;
+
+    const gpsRef = ref(database, 'GPS');
+    const route1Ref = ref(database, 'routes/Route_1');
+
+    let gpsSos = false;
+    let route1Sos = false;
+
+    const updateSosState = (gSos, rSos) => {
+      setSosActive(gSos || rSos);
+    };
+
+    const unsubscribeGps = onValue(gpsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const sosVal = data.sos !== undefined ? data.sos : data.SOS;
+        gpsSos = (sosVal === 1 || sosVal === '1' || sosVal === true || sosVal === 'true');
+      } else {
+        gpsSos = false;
+      }
+      updateSosState(gpsSos, route1Sos);
+    }, (error) => {
+      console.error("Firebase GPS SOS read error on Landing:", error);
+    });
+
+    const unsubscribeRoute1 = onValue(route1Ref, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const sosVal = data.sos !== undefined ? data.sos : data.SOS;
+        route1Sos = (sosVal === 1 || sosVal === '1' || sosVal === true || sosVal === 'true');
+      } else {
+        route1Sos = false;
+      }
+      updateSosState(gpsSos, route1Sos);
+    }, (error) => {
+      console.error("Firebase Route_1 SOS read error on Landing:", error);
+    });
+
+    return () => {
+      unsubscribeGps();
+      unsubscribeRoute1();
+    };
+  }, []);
+
+  // Handle SOS Sound Alert with Web Audio API when on main page
+  useEffect(() => {
+    let intervalId = null;
+    if (sosActive) {
+      const playBeep = () => {
+        try {
+          const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          const oscillator = audioCtx.createOscillator();
+          const gainNode = audioCtx.createGain();
+
+          oscillator.connect(gainNode);
+          gainNode.connect(audioCtx.destination);
+
+          oscillator.type = 'sawtooth';
+          oscillator.frequency.setValueAtTime(660, audioCtx.currentTime); // Siren pitch
+          gainNode.gain.setValueAtTime(0.08, audioCtx.currentTime);
+
+          oscillator.start();
+          oscillator.stop(audioCtx.currentTime + 0.25);
+        } catch (e) {
+          console.warn("Browser autoplay restrictions blocked audio siren:", e);
+        }
+      };
+
+      playBeep();
+      intervalId = setInterval(playBeep, 800);
+    }
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [sosActive]);
 
   const features = [
     {
@@ -143,9 +224,27 @@ function Landing() {
 
           <button
             onClick={handleConfirm}
-            className="w-full  bg-green-500 md:w-[500px] text-white font-semibold py-3 rounded-full shadow hover:bg-green-600 transition"
+            className="w-full  bg-green-500 md:w-[500px] text-white font-semibold py-3 rounded-full shadow hover:bg-green-600 transition cursor-pointer"
           >
             Confirm
+          </button>
+
+          <div className="flex items-center justify-between w-full md:w-[500px] py-1">
+            <div className="flex-1 border-t border-gray-200"></div>
+            <span className="px-3 text-xs text-gray-400 font-bold uppercase tracking-wider">or</span>
+            <div className="flex-1 border-t border-gray-200"></div>
+          </div>
+
+          <button
+            onClick={() => navigate('/iot-tracker')}
+            className="w-full md:w-[500px] bg-slate-900 hover:bg-slate-950 text-white font-extrabold py-3.5 rounded-full shadow-lg border border-slate-800 hover:border-slate-700 flex items-center justify-center gap-2.5 transition cursor-pointer group"
+          >
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            <span>Launch ESP32 Telemetry Dashboard</span>
+            <span className="text-gray-400 group-hover:translate-x-1 transition-transform">→</span>
           </button>
         </div>
 
@@ -221,6 +320,178 @@ function Landing() {
           </div>
         </div>
       </div>
+      
+      {/* SOS Alert Modal Overlay */}
+      {sosActive && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.65)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999,
+          padding: '20px',
+          animation: 'fadeIn 0.3s ease-out'
+        }}>
+          {/* Keyframe stylesheet */}
+          <style>{`
+            @keyframes fadeIn {
+              from { opacity: 0; }
+              to { opacity: 1; }
+            }
+            @keyframes scaleUp {
+              from { transform: scale(0.9); opacity: 0; }
+              to { transform: scale(1); opacity: 1; }
+            }
+            @keyframes pulseRed {
+              0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+              70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); }
+              100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+            }
+            .sos-pulse-button {
+              animation: pulseRed 2s infinite;
+            }
+          `}</style>
+
+          <div style={{
+            background: 'linear-gradient(135deg, #1e1b1b 0%, #0d0a0a 100%)',
+            border: '2px solid #ef4444',
+            borderRadius: '24px',
+            padding: '30px',
+            maxWidth: '480px',
+            width: '100%',
+            boxShadow: '0 25px 50px -12px rgba(239, 68, 68, 0.4)',
+            color: '#fff',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            textAlign: 'center',
+            gap: '20px',
+            animation: 'scaleUp 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards',
+          }}>
+            <div style={{
+              background: 'rgba(239, 68, 68, 0.15)',
+              border: '2px solid #ef4444',
+              borderRadius: '50%',
+              padding: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '80px',
+              height: '80px',
+            }}>
+              <AlertTriangle size={42} color="#ef4444" className="animate-bounce" />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <span style={{ fontSize: '24px', fontWeight: '900', color: '#ef4444', letterSpacing: '0.05em' }}>
+                ⚠️ EMERGENCY ALERT
+              </span>
+              <span style={{ fontSize: '18px', fontWeight: '700', color: '#f3f4f6' }}>
+                SOS Signal Triggered
+              </span>
+              <p style={{ fontSize: '14px', color: '#9ca3af', lineHeight: '1.5', margin: '8px 0 0 0' }}>
+                An active emergency alert was triggered by the IoT device on <strong>Route 1</strong>. Immediate assistance may be required.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', width: '100%', gap: '10px', marginTop: '10px' }}>
+              <button
+                onClick={() => navigate('/iot-tracker')}
+                className="sos-pulse-button"
+                style={{
+                  width: '100%',
+                  padding: '14px 20px',
+                  background: '#ef4444',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '14px',
+                  fontWeight: '800',
+                  fontSize: '15px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = '#dc2626'}
+                onMouseLeave={(e) => e.currentTarget.style.background = '#ef4444'}
+              >
+                🚨 OPEN TELEMETRY DASHBOARD
+              </button>
+
+              <button
+                onClick={() => navigate('/BusTracker', { state: { route: 'Route 1' } })}
+                style={{
+                  width: '100%',
+                  padding: '12px 20px',
+                  background: 'rgba(255, 255, 255, 0.08)',
+                  color: '#d1d5db',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  borderRadius: '14px',
+                  fontWeight: '700',
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.15)';
+                  e.currentTarget.style.color = '#fff';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
+                  e.currentTarget.style.color = '#d1d5db';
+                }}
+              >
+                <MapPin size={16} />
+                Locate on Standard Map
+              </button>
+
+              <button
+                onClick={() => {
+                  setSosActive(false);
+                  if (database) {
+                    set(ref(database, 'GPS/sos'), 0).catch(err => console.error("Error resetting GPS SOS:", err));
+                    set(ref(database, 'routes/Route_1/sos'), 0).catch(err => console.error("Error resetting Route_1 SOS:", err));
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  padding: '12px 20px',
+                  background: 'rgba(255, 255, 255, 0.08)',
+                  color: '#d1d5db',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  borderRadius: '14px',
+                  fontWeight: '600',
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.15)';
+                  e.currentTarget.style.color = '#fff';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
+                  e.currentTarget.style.color = '#d1d5db';
+                }}
+              >
+                Dismiss Warning
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

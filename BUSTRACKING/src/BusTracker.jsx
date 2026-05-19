@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { database } from './firebase';
-import { ref, onValue } from 'firebase/database';
+import { ref, onValue, set } from 'firebase/database';
 import { ArrowLeft, MapPin, AlertTriangle, Gauge, Clock, Navigation } from 'lucide-react';
 
 // GRIET coordinates
@@ -72,66 +72,130 @@ function BusTracker() {
     const firebaseKey = selectedRoute.replace(/ /g, '_');
     const isIoT = selectedRoute === 'Route 1';
     
-    // Listen to either /GPS for the physical IoT tracker, or /routes/Route_X for the simulated routes
-    const routeRef = isIoT ? ref(database, 'GPS') : ref(database, `routes/${firebaseKey}`);
-    
-    const unsubscribe = onValue(routeRef, (snapshot) => {
+    const parseData = (data) => {
+      if (!data) return null;
+      let latVal = undefined;
+      let lngVal = undefined;
+
+      if (data.lat !== undefined) latVal = Number(data.lat);
+      else if (data.latitude !== undefined) latVal = Number(data.latitude);
+
+      if (data.lng !== undefined) lngVal = Number(data.lng);
+      else if (data.longitude !== undefined) lngVal = Number(data.longitude);
+
+      if (latVal !== undefined && lngVal !== undefined && !isNaN(latVal) && !isNaN(lngVal) && latVal !== 0 && lngVal !== 0) {
+        return {
+          lat: latVal,
+          lng: lngVal,
+          speed: data.speed !== undefined ? Number(data.speed) : 25
+        };
+      }
+      return null;
+    };
+
+    if (isIoT) {
+      // For Route 1 (IoT), we listen EXCLUSIVELY to 'GPS' node which is updated by your real ESP32
+      const gpsRef = ref(database, 'GPS');
+
+      const handleSnapshot = (snapshot) => {
+        const data = snapshot.val();
+        const parsed = parseData(data);
+        if (parsed) {
+          setCoordinate([parsed.lat, parsed.lng]);
+          setSpeed(parsed.speed);
+          
+          const dist = haversine(parsed.lat, parsed.lng, GRIET_LAT, GRIET_LNG);
+          setDistance(dist);
+          
+          const activeSpeed = parsed.speed > 5 ? parsed.speed : BUS_SPEED_KMH;
+          const etaValue = Math.round((dist / activeSpeed) * 60);
+          setEta(etaValue);
+        }
+      };
+
+      const unsubscribeGps = onValue(gpsRef, handleSnapshot, (error) => {
+        console.error("Firebase GPS read error:", error);
+        setFirebaseError(true);
+      });
+
+      return () => {
+        unsubscribeGps();
+      };
+    } else {
+      // For simulated routes (Route 2 - 17)
+      const routeRef = ref(database, `routes/${firebaseKey}`);
+      const unsubscribe = onValue(routeRef, (snapshot) => {
+        const data = snapshot.val();
+        const parsed = parseData(data);
+        if (parsed) {
+          setCoordinate([parsed.lat, parsed.lng]);
+          setSpeed(25);
+          
+          const dist = haversine(parsed.lat, parsed.lng, GRIET_LAT, GRIET_LNG);
+          setDistance(dist);
+          
+          const etaValue = Math.round((dist / BUS_SPEED_KMH) * 60);
+          setEta(etaValue);
+        } else {
+          setCoordinate(null);
+          setEta(null);
+          setDistance(null);
+          setSpeed(0);
+        }
+      }, (error) => {
+        console.error("Firebase read error:", error);
+        setFirebaseError(true);
+      });
+
+      return () => unsubscribe();
+    }
+  }, [selectedRoute]);
+
+  // Fetch global SOS status from Firebase Realtime Database
+  useEffect(() => {
+    if (!database) return;
+
+    const gpsRef = ref(database, 'GPS');
+    const route1Ref = ref(database, 'routes/Route_1');
+
+    let gpsSos = false;
+    let route1Sos = false;
+
+    const updateSosState = (gSos, rSos) => {
+      setSosActive(gSos || rSos);
+    };
+
+    const unsubscribeGps = onValue(gpsRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
-        if (isIoT) {
-          // ESP32 IoT variables: lat, lng, speed, sos
-          if (data.lat !== undefined && data.lng !== undefined) {
-            setCoordinate([data.lat, data.lng]);
-            setSpeed(data.speed !== undefined ? Number(data.speed) : 0);
-            setSosActive(data.sos === 1);
-            
-            const dist = haversine(data.lat, data.lng, GRIET_LAT, GRIET_LNG);
-            setDistance(dist);
-            
-            const activeSpeed = data.speed > 5 ? data.speed : BUS_SPEED_KMH;
-            const etaValue = Math.round((dist / activeSpeed) * 60);
-            setEta(etaValue);
-          } else {
-            setCoordinate(null);
-            setEta(null);
-            setDistance(null);
-            setSpeed(0);
-            setSosActive(false);
-          }
-        } else {
-          // Simulated route: latitude, longitude, status
-          if (data.latitude !== undefined && data.longitude !== undefined) {
-            setCoordinate([data.latitude, data.longitude]);
-            setSpeed(25);
-            setSosActive(false);
-            
-            const dist = haversine(data.latitude, data.longitude, GRIET_LAT, GRIET_LNG);
-            setDistance(dist);
-            
-            const etaValue = Math.round((dist / BUS_SPEED_KMH) * 60);
-            setEta(etaValue);
-          } else {
-            setCoordinate(null);
-            setEta(null);
-            setDistance(null);
-            setSpeed(0);
-            setSosActive(false);
-          }
-        }
+        const sosVal = data.sos !== undefined ? data.sos : data.SOS;
+        gpsSos = (sosVal === 1 || sosVal === '1' || sosVal === true || sosVal === 'true');
       } else {
-        setCoordinate(null);
-        setEta(null);
-        setDistance(null);
-        setSpeed(0);
-        setSosActive(false);
+        gpsSos = false;
       }
+      updateSosState(gpsSos, route1Sos);
     }, (error) => {
-      console.error("Firebase read error:", error);
-      setFirebaseError(true);
+      console.error("Firebase GPS SOS read error on BusTracker:", error);
     });
 
-    return () => unsubscribe();
-  }, [selectedRoute]);
+    const unsubscribeRoute1 = onValue(route1Ref, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const sosVal = data.sos !== undefined ? data.sos : data.SOS;
+        route1Sos = (sosVal === 1 || sosVal === '1' || sosVal === true || sosVal === 'true');
+      } else {
+        route1Sos = false;
+      }
+      updateSosState(gpsSos, route1Sos);
+    }, (error) => {
+      console.error("Firebase Route_1 SOS read error on BusTracker:", error);
+    });
+
+    return () => {
+      unsubscribeGps();
+      unsubscribeRoute1();
+    };
+  }, []);
 
   // Update bus marker position and SOS warning circle on map
   useEffect(() => {
@@ -336,7 +400,7 @@ function BusTracker() {
             gap: '12px',
             backdropFilter: 'blur(10px)',
             maxWidth: '90%',
-            width: '420px',
+            width: '460px',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', borderRadius: '50%', padding: '6px' }}>
@@ -344,7 +408,55 @@ function BusTracker() {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
             <span style={{ fontSize: '15px', fontWeight: '800', tracking: '0.05em' }}>🚨 SOS SIGNAL DETECTED</span>
-            <span style={{ fontSize: '12px', fontWeight: '500', opacity: 0.9 }}>Emergency button pressed on IoT device!</span>
+            <span style={{ fontSize: '11px', fontWeight: '500', opacity: 0.9 }}>Emergency button pressed on Route 1 IoT device!</span>
+          </div>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            {selectedRoute !== 'Route 1' && (
+              <button
+                onClick={() => {
+                  navigate('/BusTracker', { state: { route: 'Route 1' } });
+                  window.location.reload();
+                }}
+                style={{
+                  background: '#fff',
+                  color: '#ef4444',
+                  border: 'none',
+                  padding: '8px 14px',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  fontWeight: '800',
+                  cursor: 'pointer',
+                  transition: 'transform 0.15s ease',
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+                onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+              >
+                Track
+              </button>
+            )}
+            <button
+              onClick={() => {
+                if (database) {
+                  set(ref(database, 'GPS/sos'), 0).catch(err => console.error("Error resetting GPS SOS:", err));
+                  set(ref(database, 'routes/Route_1/sos'), 0).catch(err => console.error("Error resetting Route_1 SOS:", err));
+                }
+              }}
+              style={{
+                background: 'rgba(255, 255, 255, 0.15)',
+                color: '#fff',
+                border: '1px solid rgba(255, 255, 255, 0.3)',
+                padding: '8px 14px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: '700',
+                cursor: 'pointer',
+                transition: 'transform 0.15s ease',
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+              onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+            >
+              Resolve
+            </button>
           </div>
         </div>
       )}
