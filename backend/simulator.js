@@ -64,7 +64,7 @@ function generateRandomCoordinate(baseLat, baseLng, maxOffset = 0.001) {
 
 async function sendAllRoutes() {
   for (let i = 1; i <= ROUTE_COUNT; i++) {
-    const route = `Route ${i}`;
+    const route = `Route_${i}`;
     let lat, lng;
 
     if (i === 1) {
@@ -84,7 +84,22 @@ async function sendAllRoutes() {
         status: 'active',
         timestamp: Date.now()
       });
-      console.log(`✅ Firebase Written: (${lat}, ${lng}) for ${route}`);
+
+      if (i === 1) {
+        // Also simulate the physical ESP32 GPS Tracker
+        const simulatedSpeed = Number((22.5 + Math.random() * 15).toFixed(1)); // 22.5 to 37.5 km/h
+        const simulatedSos = (route1Index === 4 || route1Index === 5) ? 1 : 0; // Trigger SOS simulation on indices 4 and 5
+        await set(ref(db, 'GPS'), {
+          lat: lat,
+          lng: lng,
+          speed: simulatedSpeed,
+          sos: simulatedSos,
+          timestamp: Date.now()
+        });
+        console.log(`✅ Firebase Written: (${lat}, ${lng}) for Route 1 AND /GPS node (Speed: ${simulatedSpeed} km/h, SOS: ${simulatedSos})`);
+      } else {
+        console.log(`✅ Firebase Written: (${lat}, ${lng}) for ${route}`);
+      }
     } catch (err) {
       console.error(`❌ Error writing to Firebase for ${route}:`, err.message);
     }
@@ -102,7 +117,7 @@ function sendStoppedStatus() {
   const promises = [];
 
   for (let i = 1; i <= ROUTE_COUNT; i++) {
-    const route = `Route ${i}`;
+    const route = `Route_${i}`;
     
     promises.push(
       set(ref(db, `routes/${route}`), {
@@ -115,6 +130,21 @@ function sendStoppedStatus() {
       })
     );
   }
+
+  // Also reset the IoT GPS node on exit
+  promises.push(
+    set(ref(db, 'GPS'), {
+      lat: 0,
+      lng: 0,
+      speed: 0,
+      sos: 0,
+      timestamp: Date.now()
+    }).then(() => {
+      console.log(`🛑 Firebase GPS node reset`);
+    }).catch(err => {
+      console.error(`❌ Error resetting GPS node:`, err.message);
+    })
+  );
 
   Promise.all(promises).finally(() => process.exit(0));
 }

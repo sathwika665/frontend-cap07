@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { database } from './firebase';
 import { ref, onValue } from 'firebase/database';
+import { ArrowLeft, MapPin, AlertTriangle, Gauge, Clock, Navigation } from 'lucide-react';
 
 // GRIET coordinates
 const GRIET_LAT = 17.525;
@@ -22,16 +23,21 @@ function haversine(lat1, lon1, lat2, lon2) {
 
 function BusTracker() {
   const location = useLocation();
+  const navigate = useNavigate();
   const selectedRoute = location.state?.route || null;
 
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markerRef = useRef(null);
+  const sosCircleRef = useRef(null);
 
   const [coordinate, setCoordinate] = useState(null);
   const [eta, setEta] = useState(null);
+  const [distance, setDistance] = useState(null);
   const [hasCentered, setHasCentered] = useState(false);
   const [firebaseError, setFirebaseError] = useState(false);
+  const [speed, setSpeed] = useState(0);
+  const [sosActive, setSosActive] = useState(false);
 
   // Initialize map on mount
   useEffect(() => {
@@ -64,19 +70,60 @@ function BusTracker() {
     }
 
     const firebaseKey = selectedRoute.replace(/ /g, '_');
-    const routeRef = ref(database, `routes/${firebaseKey}`);
+    const isIoT = selectedRoute === 'Route 1';
+    
+    // Listen to either /GPS for the physical IoT tracker, or /routes/Route_X for the simulated routes
+    const routeRef = isIoT ? ref(database, 'GPS') : ref(database, `routes/${firebaseKey}`);
+    
     const unsubscribe = onValue(routeRef, (snapshot) => {
       const data = snapshot.val();
-      if (data && data.latitude && data.longitude) {
-        setCoordinate([data.latitude, data.longitude]);
-        
-        // Calculate ETA securely on frontend utilizing destination coordinates
-        const dist = haversine(data.latitude, data.longitude, GRIET_LAT, GRIET_LNG);
-        const etaValue = Math.round((dist / BUS_SPEED_KMH) * 60);
-        setEta(etaValue);
+      if (data) {
+        if (isIoT) {
+          // ESP32 IoT variables: lat, lng, speed, sos
+          if (data.lat !== undefined && data.lng !== undefined) {
+            setCoordinate([data.lat, data.lng]);
+            setSpeed(data.speed !== undefined ? Number(data.speed) : 0);
+            setSosActive(data.sos === 1);
+            
+            const dist = haversine(data.lat, data.lng, GRIET_LAT, GRIET_LNG);
+            setDistance(dist);
+            
+            const activeSpeed = data.speed > 5 ? data.speed : BUS_SPEED_KMH;
+            const etaValue = Math.round((dist / activeSpeed) * 60);
+            setEta(etaValue);
+          } else {
+            setCoordinate(null);
+            setEta(null);
+            setDistance(null);
+            setSpeed(0);
+            setSosActive(false);
+          }
+        } else {
+          // Simulated route: latitude, longitude, status
+          if (data.latitude !== undefined && data.longitude !== undefined) {
+            setCoordinate([data.latitude, data.longitude]);
+            setSpeed(25);
+            setSosActive(false);
+            
+            const dist = haversine(data.latitude, data.longitude, GRIET_LAT, GRIET_LNG);
+            setDistance(dist);
+            
+            const etaValue = Math.round((dist / BUS_SPEED_KMH) * 60);
+            setEta(etaValue);
+          } else {
+            setCoordinate(null);
+            setEta(null);
+            setDistance(null);
+            setSpeed(0);
+            setSosActive(false);
+          }
+        }
       } else {
         setCoordinate(null);
         setEta(null);
+        setDistance(null);
+        setSpeed(0);
+        setSosActive(false);
       }
     }, (error) => {
       console.error("Firebase read error:", error);
@@ -86,7 +133,7 @@ function BusTracker() {
     return () => unsubscribe();
   }, [selectedRoute]);
 
-  // Update bus marker position on map
+  // Update bus marker position and SOS warning circle on map
   useEffect(() => {
     if (!mapInstanceRef.current) return;
 
@@ -106,8 +153,29 @@ function BusTracker() {
         markerRef.current = marker;
       }
 
+      // Draw red pulsing indicator circle around the bus if SOS is triggered
+      if (sosActive) {
+        if (sosCircleRef.current) {
+          sosCircleRef.current.setLatLng(coordinate);
+        } else {
+          sosCircleRef.current = L.circle(coordinate, {
+            radius: 150,
+            color: '#ff4d4f',
+            fillColor: '#ff4d4f',
+            fillOpacity: 0.45,
+            weight: 2,
+            dashArray: '5, 5'
+          }).addTo(mapInstanceRef.current);
+        }
+      } else {
+        if (sosCircleRef.current) {
+          mapInstanceRef.current.removeLayer(sosCircleRef.current);
+          sosCircleRef.current = null;
+        }
+      }
+
       if (!hasCentered) {
-        mapInstanceRef.current.setView(coordinate, 14);
+        mapInstanceRef.current.setView(coordinate, 15);
         setHasCentered(true);
       }
     } else {
@@ -115,13 +183,49 @@ function BusTracker() {
         mapInstanceRef.current.removeLayer(markerRef.current);
         markerRef.current = null;
       }
+      if (sosCircleRef.current) {
+        mapInstanceRef.current.removeLayer(sosCircleRef.current);
+        sosCircleRef.current = null;
+      }
     }
-  }, [coordinate, selectedRoute, hasCentered]);
+  }, [coordinate, selectedRoute, hasCentered, sosActive]);
 
   // Reset centering when route changes
   useEffect(() => {
     setHasCentered(false);
   }, [selectedRoute]);
+
+  // Handle SOS Sound Alert with Web Audio API
+  useEffect(() => {
+    let intervalId = null;
+    if (sosActive) {
+      const playBeep = () => {
+        try {
+          const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          const oscillator = audioCtx.createOscillator();
+          const gainNode = audioCtx.createGain();
+
+          oscillator.connect(gainNode);
+          gainNode.connect(audioCtx.destination);
+
+          oscillator.type = 'sawtooth';
+          oscillator.frequency.setValueAtTime(660, audioCtx.currentTime); // Siren pitch
+          gainNode.gain.setValueAtTime(0.08, audioCtx.currentTime);
+
+          oscillator.start();
+          oscillator.stop(audioCtx.currentTime + 0.25);
+        } catch (e) {
+          console.warn("Browser autoplay restrictions blocked audio siren:", e);
+        }
+      };
+
+      playBeep();
+      intervalId = setInterval(playBeep, 800);
+    }
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [sosActive]);
 
   const handleRecenter = () => {
     if (mapInstanceRef.current && Array.isArray(coordinate) && coordinate.length === 2) {
@@ -129,58 +233,238 @@ function BusTracker() {
     }
   };
 
+  const handleBack = () => {
+    navigate('/');
+  };
+
   return (
-    <div style={{ position: 'relative', height: '100vh', width: '100vw', minHeight: 400, minWidth: 400 }}>
+    <div style={{ position: 'relative', height: '100vh', width: '100vw', minHeight: 400, minWidth: 400, fontFamily: "'Inter', 'Outfit', sans-serif", overflow: 'hidden' }}>
+      
+      {/* Keyframe styles for beautiful animations */}
+      <style>{`
+        @keyframes sosFlash {
+          0% { background-color: rgba(239, 68, 68, 0.95); box-shadow: 0 4px 20px rgba(239, 68, 68, 0.6); }
+          50% { background-color: rgba(220, 38, 38, 0.7); box-shadow: 0 4px 40px rgba(220, 38, 38, 0.8); }
+          100% { background-color: rgba(239, 68, 68, 0.95); box-shadow: 0 4px 20px rgba(239, 68, 68, 0.6); }
+        }
+        @keyframes pulseGreen {
+          0% { transform: scale(0.95); opacity: 0.5; }
+          50% { transform: scale(1.15); opacity: 1; }
+          100% { transform: scale(0.95); opacity: 0.5; }
+        }
+        @keyframes slideIn {
+          from { transform: translateY(30px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
+        }
+        .animate-sos {
+          animation: sosFlash 1.2s infinite ease-in-out;
+        }
+        .pulse-dot {
+          animation: pulseGreen 1.5s infinite;
+        }
+        .slide-in-panel {
+          animation: slideIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+      `}</style>
+
+      {/* Firebase Error Warning */}
       {firebaseError && (
-        <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', padding: '15px', background: '#ff4d4f', color: '#fff', textAlign: 'center', zIndex: 2000, fontWeight: 'bold' }}>
-          ⚠️ Firebase API is not configured! Please open `.env` and `.env.local` to enter your Firebase project keys.
+        <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', padding: '15px', background: '#ff4d4f', color: '#fff', textAlign: 'center', zIndex: 9999, fontWeight: 'bold', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px' }}>
+          <AlertTriangle size={20} />
+          <span>Firebase connection failed! Check your VITE_FIREBASE config settings.</span>
         </div>
       )}
+
+      {/* Map component */}
       <div
         ref={mapRef}
         style={{ height: '100%', width: '100%', zIndex: 0 }}
       />
-      {/* ETA display */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 80,
-          right: 20,
-          zIndex: 1000,
-          padding: '10px 20px',
-          background: '#fff',
-          border: '1px solid #888',
-          borderRadius: 4,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-          fontWeight: 'bold',
-          fontSize: 16,
-          userSelect: 'none',
-        }}
-      >
-        {eta !== null && eta <= 1 
-          ? 'Arrived' 
-          : eta > 1 
-          ? `Estimated Arrival: ${eta} min` 
-          : 'ETA not available'}
-      </div>
-      {/* Recenter button */}
+
+      {/* Floating Back Navigation Button */}
       <button
-        onClick={handleRecenter}
+        onClick={handleBack}
         style={{
           position: 'absolute',
           top: 20,
-          right: 20,
+          left: 20,
           zIndex: 1000,
-          padding: '10px 20px',
-          background: '#fff',
-          border: '1px solid #888',
-          borderRadius: 4,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '10px 18px',
+          background: 'rgba(255, 255, 255, 0.9)',
+          backdropFilter: 'blur(8px)',
+          border: '1px solid rgba(0, 0, 0, 0.1)',
+          borderRadius: '12px',
+          color: '#1f2937',
+          fontWeight: '600',
+          fontSize: '14px',
           cursor: 'pointer',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)',
+          transition: 'all 0.2s ease',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = '#fff';
+          e.currentTarget.style.transform = 'translateX(-2px)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.9)';
+          e.currentTarget.style.transform = 'translateX(0)';
         }}
       >
-        Recenter
+        <ArrowLeft size={16} />
+        Back
       </button>
+
+      {/* High-priority Emergency SOS Banner Overlay */}
+      {sosActive && (
+        <div 
+          className="animate-sos"
+          style={{
+            position: 'absolute',
+            top: 20,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 9999,
+            color: '#fff',
+            padding: '14px 28px',
+            borderRadius: '16px',
+            border: '2px solid rgba(255, 255, 255, 0.4)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            backdropFilter: 'blur(10px)',
+            maxWidth: '90%',
+            width: '420px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', borderRadius: '50%', padding: '6px' }}>
+            <AlertTriangle size={24} color="#ef4444" />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+            <span style={{ fontSize: '15px', fontWeight: '800', tracking: '0.05em' }}>🚨 SOS SIGNAL DETECTED</span>
+            <span style={{ fontSize: '12px', fontWeight: '500', opacity: 0.9 }}>Emergency button pressed on IoT device!</span>
+          </div>
+        </div>
+      )}
+
+      {/* Main Glassmorphism Telemetry Dashboard */}
+      {selectedRoute && (
+        <div 
+          className="slide-in-panel"
+          style={{
+            position: 'absolute',
+            bottom: 24,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 1000,
+            width: '90%',
+            maxWidth: '460px',
+            background: 'rgba(255, 255, 255, 0.85)',
+            backdropFilter: 'blur(16px)',
+            webkitBackdropFilter: 'blur(16px)',
+            border: sosActive ? '2px solid #ef4444' : '1px solid rgba(255, 255, 255, 0.4)',
+            borderRadius: '24px',
+            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.12)',
+            padding: '20px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px',
+            transition: 'border 0.3s ease',
+          }}
+        >
+          {/* Header row: Route details and device connection indicator */}
+          <div style={{ display: 'flex', justifyBetween: 'space-between', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(0,0,0,0.06)', paddingBottom: '12px' }}>
+            <div>
+              <span style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase', tracking: '0.05em' }}>Selected Route</span>
+              <span style={{ fontSize: '20px', fontWeight: '800', color: '#111827' }}>{selectedRoute}</span>
+            </div>
+            
+            {/* Status indicator */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: selectedRoute === 'Route 1' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.12)', padding: '6px 12px', borderRadius: '20px' }}>
+              <div 
+                className="pulse-dot"
+                style={{ 
+                  width: '8px', 
+                  height: '8px', 
+                  borderRadius: '50%', 
+                  background: selectedRoute === 'Route 1' ? '#10b981' : '#3b82f6',
+                }} 
+              />
+              <span style={{ fontSize: '11px', fontWeight: '700', color: selectedRoute === 'Route 1' ? '#047857' : '#1d4ed8' }}>
+                {selectedRoute === 'Route 1' ? 'LIVE ESP32' : 'SIMULATED'}
+              </span>
+            </div>
+          </div>
+
+          {/* Telemetry Numbers Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+            
+            {/* Speed Panel */}
+            <div style={{ background: 'rgba(0, 0, 0, 0.03)', borderRadius: '16px', padding: '12px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+              <Gauge size={18} color="#6b7280" />
+              <span style={{ fontSize: '10px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>Speed</span>
+              <span style={{ fontSize: '16px', fontWeight: '800', color: '#111827' }}>
+                {coordinate ? `${speed} km/h` : '0 km/h'}
+              </span>
+            </div>
+
+            {/* ETA Panel */}
+            <div style={{ background: 'rgba(0, 0, 0, 0.03)', borderRadius: '16px', padding: '12px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+              <Clock size={18} color="#6b7280" />
+              <span style={{ fontSize: '10px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>ETA</span>
+              <span style={{ fontSize: '16px', fontWeight: '800', color: '#111827' }}>
+                {eta !== null ? (eta <= 1 ? 'Arrived' : `${eta} mins`) : 'N/A'}
+              </span>
+            </div>
+
+            {/* Distance Panel */}
+            <div style={{ background: 'rgba(0, 0, 0, 0.03)', borderRadius: '16px', padding: '12px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+              <Navigation size={18} color="#6b7280" />
+              <span style={{ fontSize: '10px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>Distance</span>
+              <span style={{ fontSize: '16px', fontWeight: '800', color: '#111827' }}>
+                {distance !== null ? `${distance.toFixed(2)} km` : 'N/A'}
+              </span>
+            </div>
+
+          </div>
+
+          {/* Quick Action Button Bar */}
+          <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
+            <button
+              onClick={handleRecenter}
+              style={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                padding: '12px',
+                background: '#111827',
+                border: 'none',
+                borderRadius: '14px',
+                color: '#fff',
+                fontWeight: '700',
+                fontSize: '14px',
+                cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(17, 24, 39, 0.15)',
+                transition: 'all 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#1f2937';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = '#111827';
+              }}
+            >
+              <MapPin size={16} />
+              Recenter Map
+            </button>
+          </div>
+
+        </div>
+      )}
     </div>
   );
 }

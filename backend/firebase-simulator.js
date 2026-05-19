@@ -41,7 +41,7 @@ let route1Index = 0;
 
 
 async function sendAllRoutes() {
-  const routeName = `Route 1`;
+  const routeName = `Route_1`;
   const r1Pos = route1Path[route1Index];
   const lat = r1Pos.lat;
   const lng = r1Pos.lng;
@@ -54,9 +54,22 @@ async function sendAllRoutes() {
       status: 'active',
       timestamp: Date.now()
     });
-    console.log(`✅ Firebase Written: (${lat}, ${lng}) for ${routeName}`);
+
+    // Also write to GPS node to simulate ESP32 IoT Device
+    const simulatedSpeed = Number((22.5 + Math.random() * 15).toFixed(1)); // 22.5 to 37.5 km/h
+    const simulatedSos = (route1Index === 4 || route1Index === 5) ? 1 : 0; // Trigger SOS simulation on indices 4 and 5
+
+    await set(ref(db, 'GPS'), {
+      lat: lat,
+      lng: lng,
+      speed: simulatedSpeed,
+      sos: simulatedSos,
+      timestamp: Date.now()
+    });
+
+    console.log(`✅ Firebase Written: (${lat}, ${lng}) for ${routeName} AND /GPS node (Speed: ${simulatedSpeed} km/h, SOS: ${simulatedSos})`);
   } catch (err) {
-    console.error(`❌ Error writing to Firebase for ${routeName}:`, err.message);
+    console.error(`❌ Error writing to Firebase:`, err.message);
   }
   
   route1Index = (route1Index + 1) % route1Path.length;
@@ -65,7 +78,29 @@ async function sendAllRoutes() {
 const interval = setInterval(sendAllRoutes, 2000);
 
 process.on('SIGINT', async () => {
-    console.log('🛑 Shutting down simulator.');
+    console.log('🛑 Shutting down simulator. Resetting Firebase GPS node...');
     clearInterval(interval);
+    try {
+      await set(ref(db, 'GPS'), {
+        lat: 0,
+        lng: 0,
+        speed: 0,
+        sos: 0,
+        timestamp: Date.now()
+      });
+      console.log('✅ Firebase GPS node successfully reset.');
+    } catch (err) {
+      console.error('❌ Failed to reset Firebase GPS node on shutdown:', err.message);
+    }
     process.exit(0);
+});
+
+// Dummy HTTP server to keep Render Web Service alive
+const http = require('http');
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end('Firebase Simulator is running ✅');
+}).listen(PORT, () => {
+  console.log(`🌐 Dummy server listening on port ${PORT}`);
 });
