@@ -38,6 +38,7 @@ function BusTracker() {
   const [firebaseError, setFirebaseError] = useState(false);
   const [speed, setSpeed] = useState(0);
   const [sosActive, setSosActive] = useState(false);
+  const [sosRouteName, setSosRouteName] = useState('');
 
   // Initialize map on mount
   useEffect(() => {
@@ -87,7 +88,7 @@ function BusTracker() {
         return {
           lat: latVal,
           lng: lngVal,
-          speed: data.speed !== undefined ? Number(data.speed) : 25
+          speed: data.speed !== undefined ? Number(data.speed) : 0
         };
       }
       return null;
@@ -122,19 +123,20 @@ function BusTracker() {
         unsubscribeGps();
       };
     } else {
-      // For simulated routes (Route 2 - 17)
+      // For all other routes, read directly from routes/Route_X
       const routeRef = ref(database, `routes/${firebaseKey}`);
       const unsubscribe = onValue(routeRef, (snapshot) => {
         const data = snapshot.val();
         const parsed = parseData(data);
         if (parsed) {
           setCoordinate([parsed.lat, parsed.lng]);
-          setSpeed(25);
+          setSpeed(parsed.speed);
           
           const dist = haversine(parsed.lat, parsed.lng, GRIET_LAT, GRIET_LNG);
           setDistance(dist);
           
-          const etaValue = Math.round((dist / BUS_SPEED_KMH) * 60);
+          const activeSpeed = parsed.speed > 5 ? parsed.speed : BUS_SPEED_KMH;
+          const etaValue = Math.round((dist / activeSpeed) * 60);
           setEta(etaValue);
         } else {
           setCoordinate(null);
@@ -156,44 +158,63 @@ function BusTracker() {
     if (!database) return;
 
     const gpsRef = ref(database, 'GPS');
-    const route1Ref = ref(database, 'routes/Route_1');
+    const routesRef = ref(database, 'routes');
 
-    let gpsSos = false;
-    let route1Sos = false;
+    let activeSosGPS = null;
+    let activeSosRoutes = [];
 
-    const updateSosState = (gSos, rSos) => {
-      setSosActive(gSos || rSos);
+    const updateSosState = (gpsSosRoute, routesSosList) => {
+      const activeList = [];
+      if (gpsSosRoute) activeList.push(gpsSosRoute);
+      activeList.push(...routesSosList);
+
+      if (activeList.length > 0) {
+        setSosActive(true);
+        setSosRouteName(activeList.join(', '));
+      } else {
+        setSosActive(false);
+        setSosRouteName('');
+      }
     };
 
     const unsubscribeGps = onValue(gpsRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
         const sosVal = data.sos !== undefined ? data.sos : data.SOS;
-        gpsSos = (sosVal === 1 || sosVal === '1' || sosVal === true || sosVal === 'true');
+        const isSos = (sosVal === 1 || sosVal === '1' || sosVal === true || sosVal === 'true');
+        activeSosGPS = isSos ? 'Route 1 (IoT)' : null;
       } else {
-        gpsSos = false;
+        activeSosGPS = null;
       }
-      updateSosState(gpsSos, route1Sos);
+      updateSosState(activeSosGPS, activeSosRoutes);
     }, (error) => {
       console.error("Firebase GPS SOS read error on BusTracker:", error);
     });
 
-    const unsubscribeRoute1 = onValue(route1Ref, (snapshot) => {
+    const unsubscribeRoutes = onValue(routesRef, (snapshot) => {
       const data = snapshot.val();
+      const tempActive = [];
       if (data) {
-        const sosVal = data.sos !== undefined ? data.sos : data.SOS;
-        route1Sos = (sosVal === 1 || sosVal === '1' || sosVal === true || sosVal === 'true');
-      } else {
-        route1Sos = false;
+        Object.keys(data).forEach((routeKey) => {
+          const routeData = data[routeKey];
+          if (routeData) {
+            const sosVal = routeData.sos !== undefined ? routeData.sos : routeData.SOS;
+            if (sosVal === 1 || sosVal === '1' || sosVal === true || sosVal === 'true') {
+              const formattedName = routeKey.replace(/_/g, ' ');
+              tempActive.push(formattedName);
+            }
+          }
+        });
       }
-      updateSosState(gpsSos, route1Sos);
+      activeSosRoutes = tempActive;
+      updateSosState(activeSosGPS, activeSosRoutes);
     }, (error) => {
-      console.error("Firebase Route_1 SOS read error on BusTracker:", error);
+      console.error("Firebase routes SOS read error on BusTracker:", error);
     });
 
     return () => {
       unsubscribeGps();
-      unsubscribeRoute1();
+      unsubscribeRoutes();
     };
   }, []);
 
@@ -408,37 +429,53 @@ function BusTracker() {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
             <span style={{ fontSize: '15px', fontWeight: '800', tracking: '0.05em' }}>🚨 SOS SIGNAL DETECTED</span>
-            <span style={{ fontSize: '11px', fontWeight: '500', opacity: 0.9 }}>Emergency button pressed on Route 1 IoT device!</span>
+            <span style={{ fontSize: '11px', fontWeight: '500', opacity: 0.9 }}>Emergency button pressed on {sosRouteName}!</span>
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            {selectedRoute !== 'Route 1' && (
-              <button
-                onClick={() => {
-                  navigate('/BusTracker', { state: { route: 'Route 1' } });
-                  window.location.reload();
-                }}
-                style={{
-                  background: '#fff',
-                  color: '#ef4444',
-                  border: 'none',
-                  padding: '8px 14px',
-                  borderRadius: '8px',
-                  fontSize: '12px',
-                  fontWeight: '800',
-                  cursor: 'pointer',
-                  transition: 'transform 0.15s ease',
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
-                onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
-              >
-                Track
-              </button>
-            )}
+            {(() => {
+              const activeSosList = sosRouteName.split(', ').map(r => r.trim());
+              const targetTrackRoute = activeSosList.find(r => r !== selectedRoute);
+              if (targetTrackRoute) {
+                const routeToNavigate = targetTrackRoute.replace(' (IoT)', '');
+                return (
+                  <button
+                    onClick={() => {
+                      navigate('/BusTracker', { state: { route: routeToNavigate } });
+                      window.location.reload();
+                    }}
+                    style={{
+                      background: '#fff',
+                      color: '#ef4444',
+                      border: 'none',
+                      padding: '8px 14px',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      fontWeight: '800',
+                      cursor: 'pointer',
+                      transition: 'transform 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+                    onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                  >
+                    Track
+                  </button>
+                );
+              }
+              return null;
+            })()}
             <button
               onClick={() => {
                 if (database) {
-                  set(ref(database, 'GPS/sos'), 0).catch(err => console.error("Error resetting GPS SOS:", err));
-                  set(ref(database, 'routes/Route_1/sos'), 0).catch(err => console.error("Error resetting Route_1 SOS:", err));
+                  const activeSosList = sosRouteName.split(', ').map(r => r.trim());
+                  activeSosList.forEach(r => {
+                    if (r.includes('Route 1') || r === 'GPS') {
+                      set(ref(database, 'GPS/sos'), 0).catch(err => console.error("Error resetting GPS SOS:", err));
+                      set(ref(database, 'routes/Route_1/sos'), 0).catch(err => console.error("Error resetting Route_1 SOS:", err));
+                    } else {
+                      const key = r.replace(/ /g, '_');
+                      set(ref(database, `routes/${key}/sos`), 0).catch(err => console.error(`Error resetting ${r} SOS:`, err));
+                    }
+                  });
                 }
               }}
               style={{

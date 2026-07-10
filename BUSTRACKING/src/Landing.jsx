@@ -9,51 +9,71 @@ function Landing() {
   const [route, setRoute] = useState('');
   const [year, setYear] = useState('');
   const [sosActive, setSosActive] = useState(false);
+  const [sosRouteName, setSosRouteName] = useState('');
   const navigate = useNavigate();
 
-  // Listen to both /GPS and /routes/Route_1 nodes for SOS signal globally
+  // Listen to both /GPS and all /routes nodes for SOS signal globally
   useEffect(() => {
     if (!database) return;
 
     const gpsRef = ref(database, 'GPS');
-    const route1Ref = ref(database, 'routes/Route_1');
+    const routesRef = ref(database, 'routes');
 
-    let gpsSos = false;
-    let route1Sos = false;
+    let activeSosGPS = null;
+    let activeSosRoutes = [];
 
-    const updateSosState = (gSos, rSos) => {
-      setSosActive(gSos || rSos);
+    const updateSosState = (gpsSosRoute, routesSosList) => {
+      const activeList = [];
+      if (gpsSosRoute) activeList.push(gpsSosRoute);
+      activeList.push(...routesSosList);
+
+      if (activeList.length > 0) {
+        setSosActive(true);
+        setSosRouteName(activeList.join(', '));
+      } else {
+        setSosActive(false);
+        setSosRouteName('');
+      }
     };
 
     const unsubscribeGps = onValue(gpsRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
         const sosVal = data.sos !== undefined ? data.sos : data.SOS;
-        gpsSos = (sosVal === 1 || sosVal === '1' || sosVal === true || sosVal === 'true');
+        const isSos = (sosVal === 1 || sosVal === '1' || sosVal === true || sosVal === 'true');
+        activeSosGPS = isSos ? 'Route 1 (IoT)' : null;
       } else {
-        gpsSos = false;
+        activeSosGPS = null;
       }
-      updateSosState(gpsSos, route1Sos);
+      updateSosState(activeSosGPS, activeSosRoutes);
     }, (error) => {
       console.error("Firebase GPS SOS read error on Landing:", error);
     });
 
-    const unsubscribeRoute1 = onValue(route1Ref, (snapshot) => {
+    const unsubscribeRoutes = onValue(routesRef, (snapshot) => {
       const data = snapshot.val();
+      const tempActive = [];
       if (data) {
-        const sosVal = data.sos !== undefined ? data.sos : data.SOS;
-        route1Sos = (sosVal === 1 || sosVal === '1' || sosVal === true || sosVal === 'true');
-      } else {
-        route1Sos = false;
+        Object.keys(data).forEach((routeKey) => {
+          const routeData = data[routeKey];
+          if (routeData) {
+            const sosVal = routeData.sos !== undefined ? routeData.sos : routeData.SOS;
+            if (sosVal === 1 || sosVal === '1' || sosVal === true || sosVal === 'true') {
+              const formattedName = routeKey.replace(/_/g, ' ');
+              tempActive.push(formattedName);
+            }
+          }
+        });
       }
-      updateSosState(gpsSos, route1Sos);
+      activeSosRoutes = tempActive;
+      updateSosState(activeSosGPS, activeSosRoutes);
     }, (error) => {
-      console.error("Firebase Route_1 SOS read error on Landing:", error);
+      console.error("Firebase routes SOS read error on Landing:", error);
     });
 
     return () => {
       unsubscribeGps();
-      unsubscribeRoute1();
+      unsubscribeRoutes();
     };
   }, []);
 
@@ -396,7 +416,7 @@ function Landing() {
                 SOS Signal Triggered
               </span>
               <p style={{ fontSize: '14px', color: '#9ca3af', lineHeight: '1.5', margin: '8px 0 0 0' }}>
-                An active emergency alert was triggered by the IoT device on <strong>Route 1</strong>. Immediate assistance may be required.
+                An active emergency alert was triggered by: <strong>{sosRouteName}</strong>. Immediate assistance may be required.
               </p>
             </div>
 
@@ -426,43 +446,60 @@ function Landing() {
                 🚨 OPEN TELEMETRY DASHBOARD
               </button>
 
-              <button
-                onClick={() => navigate('/BusTracker', { state: { route: 'Route 1' } })}
-                style={{
-                  width: '100%',
-                  padding: '12px 20px',
-                  background: 'rgba(255, 255, 255, 0.08)',
-                  color: '#d1d5db',
-                  border: '1px solid rgba(255, 255, 255, 0.15)',
-                  borderRadius: '14px',
-                  fontWeight: '700',
-                  fontSize: '14px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px',
-                  transition: 'all 0.2s',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.15)';
-                  e.currentTarget.style.color = '#fff';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
-                  e.currentTarget.style.color = '#d1d5db';
-                }}
-              >
-                <MapPin size={16} />
-                Locate on Standard Map
-              </button>
+              {(() => {
+                const activeSosList = sosRouteName.split(', ').map(r => r.trim());
+                if (activeSosList.length > 0 && activeSosList[0]) {
+                  const targetRoute = activeSosList[0].replace(' (IoT)', '');
+                  return (
+                    <button
+                      onClick={() => navigate('/BusTracker', { state: { route: targetRoute } })}
+                      style={{
+                        width: '100%',
+                        padding: '12px 20px',
+                        background: 'rgba(255, 255, 255, 0.08)',
+                        color: '#d1d5db',
+                        border: '1px solid rgba(255, 255, 255, 0.15)',
+                        borderRadius: '14px',
+                        fontWeight: '700',
+                        fontSize: '14px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        transition: 'all 0.2s',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'rgba(255, 255, 255, 0.15)';
+                        e.currentTarget.style.color = '#fff';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
+                        e.currentTarget.style.color = '#d1d5db';
+                      }}
+                    >
+                      <MapPin size={16} />
+                      Locate on Standard Map ({targetRoute})
+                    </button>
+                  );
+                }
+                return null;
+              })()}
 
               <button
                 onClick={() => {
                   setSosActive(false);
                   if (database) {
-                    set(ref(database, 'GPS/sos'), 0).catch(err => console.error("Error resetting GPS SOS:", err));
-                    set(ref(database, 'routes/Route_1/sos'), 0).catch(err => console.error("Error resetting Route_1 SOS:", err));
+                    const activeSosList = sosRouteName.split(', ').map(r => r.trim());
+                    activeSosList.forEach(r => {
+                      if (r.includes('Route 1') || r === 'GPS') {
+                        set(ref(database, 'GPS/sos'), 0).catch(err => console.error("Error resetting GPS SOS:", err));
+                        set(ref(database, 'routes/Route_1/sos'), 0).catch(err => console.error("Error resetting Route_1 SOS:", err));
+                      } else {
+                        const key = r.replace(/ /g, '_');
+                        set(ref(database, `routes/${key}/sos`), 0).catch(err => console.error(`Error resetting ${r} SOS:`, err));
+                      }
+                    });
                   }
                 }}
                 style={{
